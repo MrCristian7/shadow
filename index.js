@@ -1043,9 +1043,10 @@ function renderWBSingle(id) {
 // =====================
 // DASHBOARD EMBED
 // Layout:
-//   - Goblins: 3 inline fields (one per server), each listing all goblin types for that server
-//   - Bosses (SA fixed + World): one row of 3 inline fields per boss key,
-//     one field per server showing that boss's status
+//   - Goblins:    3 inline fields (S1 | S2 | S3), each listing all goblin types for that server
+//   - SA Bosses:  grouped by respawn tier; 3 inline fields (S1 | S2 | S3), each listing all
+//                 bosses of that tier for that server — one compact row per tier
+//   - World Bosses: 3 inline fields (S1 | S2 | S3), each listing all WBs for that server
 // =====================
 function buildShadowEmbed() {
   const embed = new EmbedBuilder()
@@ -1073,60 +1074,64 @@ function buildShadowEmbed() {
   // spacer so next section starts on a new row
   embed.addFields({ name: "\u200b", value: "\u200b", inline: false });
 
-  // ── Section 2: SA Fixed Bosses — 3 inline fields per boss (one per server) ──
+  // ── Section 2: SA Fixed + World Bosses — grouped by tier, 3 columns (S1|S2|S3) ──
+  // Build tier map for SA fixed bosses
   const fixedKeys = [...new Set(SHADOW_BOSSES.filter(b => b.type !== "goblin").map(b => b.key))];
-
+  const tierMap = {};
   for (const key of fixedKeys) {
     const first    = SHADOW_BOSSES.find(b => b.key === key);
     const respawnH = SA_RESPAWN_H[first.type];
-    const isMulti  = isMultiInstanceSAFixed(key);
+    if (!tierMap[respawnH]) tierMap[respawnH] = [];
+    tierMap[respawnH].push(key);
+  }
 
+  // One row of 3 fields per SA tier
+  for (const [respawnH, keys] of Object.entries(tierMap).sort((a, b) => Number(a[0]) - Number(b[0]))) {
     for (const s of SA_SERVERS) {
-      let value;
-      if (isMulti) {
-        const instances = getSAFixedInstances(key, s);
-        value = instances.map(b => renderSAFixedSlot(b).text).join("\n");
-      } else {
-        const id = `sa_${key}_s${s}`;
-        value = renderSAFixedSingle(id);
-      }
+      const lines = keys.map(key => {
+        const first   = SHADOW_BOSSES.find(b => b.key === key);
+        const isMulti = isMultiInstanceSAFixed(key);
+        let status;
+        if (isMulti) {
+          const instances = getSAFixedInstances(key, s);
+          status = instances.map(b => renderSAFixedSlot(b).text).join("  ");
+        } else {
+          const id = `sa_${key}_s${s}`;
+          status = renderSAFixedSingle(id);
+        }
+        return `**${first.label}**\n${status}`;
+      });
       embed.addFields({
-        name:   `👹 ${first.label} *(${respawnH}h)* — S${s}`,
-        value:  value,
+        name:   `👹 SA Bosses *(${respawnH}h)* — S${s}`,
+        value:  lines.join("\n\n"),
         inline: true,
       });
     }
-
-    // spacer after each boss row so the next boss starts fresh
     embed.addFields({ name: "\u200b", value: "\u200b", inline: false });
   }
 
-  // ── Section 3: World Bosses — 3 inline fields per boss (one per server) ──
+  // One row of 3 fields for all World Bosses (S1|S2|S3)
   const wbKeys = [...new Set(WORLD_BOSSES.map(b => b.key))];
-
-  for (const key of wbKeys) {
-    const cfg     = WORLD_BOSS_CONFIG[key];
-    const label   = WORLD_BOSSES.find(b => b.key === key).label;
-    const isMulti = isMultiInstanceWB(key);
-
-    for (const s of SA_SERVERS) {
-      let value;
+  for (const s of SA_SERVERS) {
+    const lines = wbKeys.map(key => {
+      const cfg     = WORLD_BOSS_CONFIG[key];
+      const label   = WORLD_BOSSES.find(b => b.key === key).label;
+      const isMulti = isMultiInstanceWB(key);
+      let status;
       if (isMulti) {
         const instances = getWBInstances(key, s);
-        value = instances.map(b => renderWBMultiSlot(b).text).join("\n");
+        status = instances.map(b => renderWBMultiSlot(b).text).join("  ");
       } else {
         const id = `wb_${key}_s${s}`;
-        value = renderWBSingle(id);
+        status = renderWBSingle(id);
       }
-      embed.addFields({
-        name:   `🌍 ${label} *(${cfg.respawnMs / HOUR}h)* — S${s}`,
-        value:  value,
-        inline: true,
-      });
-    }
-
-    // spacer after each boss row
-    embed.addFields({ name: "\u200b", value: "\u200b", inline: false });
+      return `**${label}** *(${cfg.respawnMs / HOUR}h)*\n${status}`;
+    });
+    embed.addFields({
+      name:   `🌍 World Bosses — S${s}`,
+      value:  lines.join("\n\n"),
+      inline: true,
+    });
   }
 
   return embed;
